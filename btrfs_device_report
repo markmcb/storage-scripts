@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+
+: '
+Author: Mark McBride <mark@markmcb.com>
+
+Description: This script provides a concise view of "btrfs device stats" and combines
+it with information from lsblk to associate the /btrfs/path, the /dev/sdX and the 
+/dev/mapper paths. While it should generally be portable on Linux machines
+it has not been extensively tested, so some hacking may be required.
+
+IMPORTANT: This script requires root priviledges as they are required by the btrfs 
+command to access device information. Running without root priviledges will exit with
+an error.
+'
+
+if [[ $EUID -ne 0 ]]; then
+	echo "This script requires root priviledges."
+	exit 2
+fi
+
+# process cli args
+OPTIND=1 # Reset in case getopts has been used previously in the shell.
+verbose=0
+optstring="vh?"
+
+while getopts $optstring opt; do
+	case "$opt" in
+	v)  verbose=1
+		;;
+	esac
+done
+
+# get paths
+paths=( `df -T | grep btrfs | sed -E "s/.*% //" | tr '\n' ' '` )
+longest_path=10
+
+# get lsblk info, make it flat per disk
+lsblk=$(lsblk -n -i -p -o NAME,TYPE,UUID | while read line; do printf "%s" "$([[ "${line}" == *"disk"* ]] && printf $'\n'"%s" "$line" || printf "%s " "$line")"; done)
+
+# get longest path name
+longest_mapping=7    # like /dev/mapper/whatever
+for path in "${paths[@]}"
+do
+	this_path_length=$( echo -n ${path} | wc -m )
+	if (( ${this_path_length} > ${longest_path} )); then
+		longest_path=$this_path_length
+	fi
+
+	# get longest device name
+	# loop through all stats output lines
+	rawstats=$(btrfs device stats ${path})
+	while IFS="" read -r p || [ -n "$p" ]
+	do
+		this_mapping_length=$( echo -n $p | sed -E "s/\[(.*)\].*/\1/" | wc -m )
+		if (( ${this_mapping_length} > ${longest_mapping} )); then
+			longest_mapping=$this_mapping_length
+		fi
+	done <<< ${rawstats}
+done
+
+longest_device=7 # like sda
+while IFS="" read -r p || [ -n "$p" ]
+do
+	if [ "${verbose}" == "0" ]; then
+		this_device_length=$( echo -n $p | awk '{printf $1}' | sed -E "s/\/dev\///" | wc -m )
+	else
+		this_device_length=$( echo -n $p | awk '{printf $1}' | wc -m )
+	fi
+	if (( ${this_device_length} > ${longest_device} )); then
+		longest_device=$this_device_length
+	fi
+done <<< ${lsblk}
+
+# show the first n characters of the device name
+if [ "${verbose}" == "0" ]; then
+	mapping_length='9'
+else
+	mapping_length="${longest_mapping}"
+fi
+
+# print header
+if [ "${verbose}" == "0" ]; then
+	valueheaders="WRFCG"
+else
+	valueheaders='Write IO   Read IO  Flush IO   Corrupt  Generate'
+fi
+printf "%-${longest_path}s  %-${mapping_length}s  %-${longest_device}s  %s\n" "BTRFS_PATH" "MAPPING" "DEVICE" "${valueheaders}"
+
+for path in "${paths[@]}"
+do
+	rawstats=$(btrfs device stats ${path})
+	lastkey=""
+
+	# loop through all stats output lines
+	while IFS="" read -r p || [ -n "$p" ]
+	do
+	# capture the disk id (key) and value of each line
+	# regex1: get stuff in [brackets], regex2: get the first 9 chars after last /
+	if [ "${verbose}" == "0" ]; then
+		key=$( echo $p | sed -E "s/\[(.*)\].*/\1/" | sed -E "s/.*\/([^/]{1,${mapping_length}}).*/\1/" )
+	else
+		key=$( echo $p | sed -E "s/\[(.*)\].*/\1/" )
+	fi
+	# regex: get what's after the space (the number value)
+	rawvalue=$(echo $p | sed -E "s/.* +//")
+	
+	if [ "${verbose}" == "0" ]; then
+		device="$(printf "%s" "${lsblk}" | grep "${key}" | awk '{printf $1}' | sed -E "s/\/dev\///")"
+	else
+		device="$(printf "%s" "${lsblk}" | grep "${key}" | awk '{printf $1}')"
+	fi
+
+	# convert any non-zero values to "x" and zeroes to "."
+	if [ "${verbose}" == "0" ]; then
+		if [ "${rawvalue}" == "0" ]; then
+			value='.'
+		else
+			value="x"
+		fi
+		valuesize=1
+	else
+		value=${rawvalue}
+		valuesize=8
+	fi
+
+	# if the key changed, and it wasn't blank, put a newline
+	if [ "${key}" != "${lastkey}" ] && [ "${lastkey}" != "" ]; then
+		echo ""
+	fi 
+
+	# if the key changed, put key value, otherwise just value
+	if [ "${key}" != "${lastkey}" ]; then
+		printf "%-${longest_path}s  %-${mapping_length}s  %-${longest_device}s  %${valuesize}s" "${path}" "${key}" "${device}" "${value}" 
+	else
+		if [ "${verbose}" == "0" ]; then
+			printf "%${valuesize}s" "${value}"
+		else
+			printf "  %${valuesize}s" "${value}"
+		fi
+	fi
+
+	# record the key for next loop
+	lastkey=$key
+
+	done <<< ${rawstats}
+	echo ""
+done

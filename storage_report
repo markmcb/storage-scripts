@@ -1,0 +1,451 @@
+#!/usr/bin/env bash
+
+: '
+Author: Mark McBride <mark@markmcb.com>
+
+Description: This script provides a way to view basic device and SMART information
+for multiple block devices. While it should generally be portable on Linux machines
+it has not been extensively tested, so some hacking may be required.
+
+IMPORTANT: This script does require root priviledges as they are required by
+smartctl to access several pieces of information. You can run without root priviledges,
+but will see "[sudo]" in the output where priviledges are required. 
+'
+
+# valid and default values
+valid_order=( "device" "capacity" "path" )
+order=${valid_order[0]}
+
+valid_format=( "horizontal" "vertical" )
+format=${valid_format[0]}
+
+valid_headers=( "DEVICE" "CAPACITY" "PATH" "MODEL" "SERIAL" "UUID" "TEMPERATURE" "STATUS" "AGE_YEARS" "LAST_SELFTESTS" "PREFAIL" "OLDAGE")
+headers_to_show=( "DEVICE" "CAPACITY" "MODEL" )
+headers_override=()
+
+# Usage =======================================================
+
+function usage {
+
+	echo "USAGE:"
+	echo "storage_report [ <options> ]"
+	echo
+
+	echo "OPTIONS: (* denotes root priviledges are required for results,"
+	echo "         otherwise \"[sudo]\" will be displayed in the output."
+	echo
+
+	echo "Output"
+	echo "-a, --age       *Show device age."
+	echo "-A, --AGE       *Show and sort by device age."
+	echo "-c, --capacity  Show device storage capacity. Default."
+	echo "-C, --CAPACITY  Show and sort by device storage capacity."
+	echo "-d, --device    Show device name."
+	echo "-D, --DEVICE    Show and sort by device name. Default."
+	echo "-i, --idle      *Spin status of HDDs. Either active or idle."i
+	echo "-m, --model     Model name."
+	echo "-p, --path      Show dev path (useful physically locating a device)."
+	echo "-P, --PATH      Show and sort by device path."
+	echo "    --pcisubst  A regex substitution, quoted, e.g., \"/a(b)c/\1/\""
+	echo "-s, --serial    Serial number."
+	echo "-t, --temp      *Temperature in Celsius."
+	echo "-u, --uuid      Show device UUID."
+	echo
+
+	echo "S.M.A.R.T. Attributes"
+	echo
+	echo "Both -o and -f will output a shorthand output that will look like ...x.."
+	echo "Each '.' or 'x' represents a SMART attribute. A '.' means that the"
+	echo "attribute is still above its threshold, whereas an 'x' is below."
+	echo 
+	echo "-f, --prefail   *Show shorthand Pre-fail attributes where VALUE <= THRESH."
+	echo "-F, --prefail2  *Show Pre-fail attributes. Output is VALUE minus THRESH."
+	echo "-l, --lasttests *Days since last short & long tests, and overall health."
+	echo "-o, --oldage    *Show shorthand of Old_age attributes where VALUE <= THRESH."
+	echo "-O, --oldage2   *Show Old_age attributes.  Output is VALUE minus THRESH."
+	echo
+
+	echo "Formatting"
+	echo "-x, --tall      Displays results with devices on the x-axis, which"
+	echo "                tends to produce a taller result."
+	echo "-y, --wide      Displays results with devices on the y-axis, which"
+	echo "                tends to produce a wider result. Default."
+	echo
+
+	echo "Documentation"
+	echo "-h, --help      Display this help message and exit."
+
+
+	echo
+
+}
+
+# Parse command line args =======================================================
+
+while [[ "$#" -gt 0 ]]; do case $1 in
+	-a|--age)		headers_override+=("AGE_YEARS");;
+	-A|--AGE)		headers_override+=("AGE_YEARS"); 	order="AGE";;
+	-c|--capacity)	headers_override+=("CAPACITY");;
+	-C|--CAPACITY)	headers_override+=("CAPACITY"); 	order="CAPACITY";;
+	-d|--device)	headers_override+=("DEVICE");;
+	-D|--DEVICE)	headers_override+=("DEVICE"); 		order="DEVICE";;
+	-f|--prefail)	headers_override+=("PREFAIL");;
+	-F|--prefail2)	headers_override+=("PREFAIL2");;
+	-h|--help)		usage; 								exit 1;;
+	-i|--idel)		headers_override+=("STATUS");;
+	-l|--lasttests)	headers_override+=("LAST_SELFTESTS");;
+	-m|--model)		headers_override+=("MODEL");;
+	-o|--oldage)	headers_override+=("OLDAGE");;
+	-O|--oldage2)	headers_override+=("OLDAGE2");;
+	-p|--pci)		headers_override+=("PATH");;
+	-P|--PATH)		headers_override+=("PATH"); 		order="PATH";;
+	--pathsubst)	pathsubst="$2"; 					shift;;
+	-s|--serial)	headers_override+=("SERIAL");;
+	-t|--temp)		headers_override+=("TEMPERATURE");;
+	-u|-uuid)		headers_override+=("UUID");;
+    -x|--tall)		format="horizontal";;
+	-y|--wide)		format="vertical";;
+  	*) echo "Unknown parameter passed: $1. Use -h for a list of valid options."; exit 1;;
+esac; shift; done
+
+if [ ${#headers_override[@]} -gt 0 ]; then
+	headers_to_show=(${headers_override[@]})
+fi
+
+# Function definitions =======================================================
+
+# Returns an error (1) if one of the required dependencies isn't available
+function check_dependencies {
+	retval=0
+	required_commands=( "lsblk" "smartctl" "grep" "sed" "tr" "udevadm" "awk" "column" "bc" )
+	for rqd_cmd in "${required_commands[@]}"
+	do
+		if ! [[ -x "$(command -v ${rqd_cmd})" ]]; then
+			echo "Could not find dependency: ${rqd_cmd}"
+			retval=1
+		fi
+	done
+	return ${retval}
+}
+
+function get_block_devices {
+	printf "%s " `lsblk -l -o NAME,TYPE -n | grep disk | grep sd | sed 's/ .*//' | tr '\n' ' '`
+}
+
+function get_headers {
+	for header in ${valid_headers[@]}; do
+		[[ " ${headers_to_show[@]} " =~ " ${header} " ]] && echo -n "${header} "
+	done
+}
+
+function get_block_device_capacity {
+	if [[ " ${headers_to_show[@]} " =~ " CAPACITY " ]]; then
+		echo -n $(echo "($(cat /sys/block/$1/size)*512)" | bc | numfmt --to=iec-i )
+	fi
+}
+
+function get_block_device_model {
+	if [[ " ${headers_to_show[@]} " =~ " MODEL " ]]; then
+		echo -n $(udevadm info --query=property --name=$1 | grep 'ID_MODEL=' | sed 's/.*=//' | sed 's/ /_/')
+	fi
+}
+
+function get_block_device_serial_number {
+	if [[ " ${headers_to_show[@]} " =~ " SERIAL " ]]; then
+		echo -n $(lsblk --nodeps -no name,serial | grep $1 | sed -E "s/[^[:blank:]]+[[:blank:]]+([^[:blank:]]+)[[:blank:]]*/\1/" )
+	fi
+}
+
+function get_block_device_temperature {
+	if [[ " ${headers_to_show[@]} " =~ " TEMPERATURE " ]]; then
+		if [[ $EUID -ne 0 ]]; then
+			echo -n "[sudo]"
+		elif [[ $1 == *"nvme"* ]]; then
+			echo -n `smartctl -x /dev/${1} | grep -E "^Temperature:"| awk '{print $2}'`"C"
+		else
+			echo -n `smartctl -A /dev/$1 | grep -m1 -E "^19(0|4)" | awk '{print $10}'`"C"
+		fi
+	fi
+}
+
+function get_block_device_uuid {
+	find -L "/dev/disk/by-uuid/" -samefile "/dev/${1}" | sed -E "s/.*\///"
+}
+
+function get_block_device_path {
+	if [[ " ${headers_to_show[@]} " =~ " PATH " ]]; then
+		if [[ ! -z "${pathsubst}" ]]; then
+			echo -n $(find -L /dev/disk/by-path/ -samefile /dev/${1} | sed -E "s/.*\///" | sed -E "s${pathsubst}")
+		else
+			echo -n $(find -L /dev/disk/by-path/ -samefile /dev/${1} | sed -E "s/.*\///")
+		fi
+	fi
+}
+
+function get_block_device_spin_status {
+	if [[ " ${headers_to_show[@]} " =~ " STATUS " ]]; then
+		if [[ $EUID -ne 0 ]]; then
+			echo -n "[sudo]"
+		else
+			smartctl -n standby /dev/$1 > /dev/null 2>&1
+			active=$?
+			echo -n $(if [ $active -eq 0 ]; then echo -n "active"; else echo -n "idle  "; fi)
+		fi
+	fi
+}
+
+# expects $1 to be a space separated string of headers
+function find_column_of_sort_key {
+	column_to_sort=1
+	column_header_array=( ${1} )
+	for column_header in "${column_header_array[@]}"; do
+		# compare lower-case versions
+	    [[ "${column_header,,}" == "${order,,}" ]] && break
+	    (( column_to_sort++ ))
+	done
+	echo -n ${column_to_sort}
+}
+
+function printf_header_and_exec_command {
+	# e.g., printf_header_and_exec_command sort -h -k3
+    IFS= read -r header
+    printf '%s\n' "$header"
+    "$@"
+}
+
+function transpose {
+	awk '
+	{ 
+	    for (i=1; i<=NF; i++)  {
+	        a[NR,i] = $i
+	    }
+	}
+	NF>p { p = NF }
+	END {    
+	    for(j=1; j<=p; j++) {
+	        str=a[1,j]
+	        for(i=2; i<=NR; i++){
+	            str=str" "a[i,j];
+	        }
+	        print str
+	    }
+	}' $1
+}
+
+function printf_horizontal_table {
+	sort_type=$( [[ "${order}" == "PATH" ]] && echo -n "-d" || echo -n "-h" )
+	printf "%s" "${single_spaced_output}" | column -t -s' ' | printf_header_and_exec_command sort ${sort_type} -k${sort_key}
+}
+
+function printf_vertical_table {
+	printf_horizontal_table | transpose | column -t -s' '
+}
+
+function collect_smart_attributes {
+		for dev in ${block_devices[@]}
+		do
+			device_smart_attributes[${dev}]=$(smartctl -A /dev/${dev} | sed -e 's/^[[:space:]]*//' | grep -E "^[[:digit:]]+")
+			while IFS="" read -r p || [ -n "$p" ]; do
+				this_id=$(echo -n $p | sed -E 's/(^[[:digit:]]+) +.*/\1/')
+				this_id_name=$(echo -n $p | sed -E 's/^[[:digit:]]+ ([^[:space:]]+) .*/\1/')
+				smart_ids_and_names[${this_id}]=${this_id_name}
+				if [[ " ${p} " =~ "Pre-fail" ]]; then
+					smart_prefail_ids+=( "${this_id}" )
+				else
+					if [[ ! " ${smart_prefail_ids[@]} " =~ " ${this_id} " ]]; then
+						smart_oldage_ids+=( "${this_id}" )
+					fi
+				fi
+			done < <(smartctl -A /dev/${dev} | sed -e 's/^[[:space:]]*//' | grep -E "^[[:digit:]]+")
+		done
+	smart_prefail_ids=( $(tr ' ' '\n' <<< "${smart_prefail_ids[@]}" | sort -nu | tr '\n' ' ') )
+	smart_oldage_ids=( $(tr ' ' '\n' <<< "${smart_oldage_ids[@]}" | sort -nu | tr '\n' ' ') )
+}
+
+# expects 2 args: device and either PREFAIL2 or OLDAGE2
+function get_block_device_smart_attributes {
+	if [[ $EUID -ne 0 ]]; then
+		if [[ "${2}" == "PREFAIL" ]] || [[ "${2}" == "OLDAGE" ]]; then
+			echo -n "[sudo]"
+		else
+			echo -n "[sudo] "
+		fi
+	else
+		if [[ "${2}" == *"PREFAIL"* ]]; then
+			attributes=("${smart_prefail_long_headers[@]}")
+		else
+			attributes=("${smart_oldage_long_headers[@]}")
+		fi
+
+		attr_status=""
+		for attr in "${attributes[@]}"
+		do
+			smart_diff="---"
+			smart_value=$(echo -e "${device_smart_attributes[${1}]}" | grep ${attr} | awk -F ' ' '{print $4}')
+			smart_thresh=$(echo -e "${device_smart_attributes[${1}]}" | grep ${attr} | awk -F ' ' '{print $6}')
+			if [[ $smart_value != "" ]]; then 
+				smart_diff="$(bc <<< "${smart_value}-${smart_thresh}")"
+			fi
+			if [[ "${2}" == "PREFAIL" ]] || [[ "${2}" == "OLDAGE" ]]; then
+				if [[ "${smart_diff}" != "---" ]]; then
+					if [[ "${smart_diff}" -gt "0" ]]; then
+						attr_status="${attr_status}."
+					else
+						attr_status="${attr_status}x"
+					fi
+				fi
+			else
+				echo -n "${smart_diff} "
+			fi
+		done
+		if [[ "${2}" == "PREFAIL" ]] || [[ "${2}" == "OLDAGE" ]]; then
+			if [[ "${attr_status}" == "" ]]; then
+				printf "%s" "---"
+			else
+				printf "%s" ${attr_status}
+			fi
+		fi
+	fi
+}
+
+function get_block_device_age {
+	if [[ $EUID -ne 0 ]]; then
+		echo -n "[sudo]"
+	else
+		if [[ "${1}" == *"nvme"* ]]; then
+			poh=$(smartctl -A "/dev/${1}" | grep -E "Power On Hours" | sed "s/,//")
+			drive_age_days=$(printf "%s" "$poh" | awk '{ printf "%d", $4/24 }' )
+		else
+			poh=$(printf "%s" "${device_smart_attributes[${1}]}" | grep -E "Power_On_Hours")
+			drive_age_days=$(printf "%s" "$poh" | awk '{ printf "%d", $10/24 }' )
+		fi
+
+		if [[ "${poh}" != "" ]]; then
+		  	printf '%1.1f' "$(bc <<< "scale=2; ${drive_age_days}/365")"
+		else
+			echo -n "---"
+		fi
+	fi
+}
+
+function get_days_since_last_tests {
+	if [[ $EUID -ne 0 ]]; then
+		echo -n "[sudo]"
+	else
+		test_results=$(smartctl -l selftest /dev/${1})
+		last_short_test_days=$( printf "%s" "${test_results}" | grep -i "short" | head -n +1 | sed -E "s/([^ ]) ([^ ])/\1_\2/g" | awk '{ printf "%3d", $5/24 }' )
+		last_extended_test_days=$( printf "%s" "${test_results}"  | grep -i "extended" | head -n +1 | sed -E "s/([^ ]) ([^ ])/\1_\2/g" | awk '{ printf "%3d", $5/24 }' )
+		last_test_result=$( printf "%s" "${test_results}" | head --lines=7 | tail --lines=1 | grep -c "Completed without error")
+		drive_age_days=$(printf "%s" "${device_smart_attributes[${1}]}" | grep "Power_On_Hours" | awk '{ printf "%d", $10/24 }')
+
+		if [[ $drive_age_days == "" ]] || [[ $last_short_test_days == "" ]] && [[ $last_extended_test_days == "" ]]; then
+			echo -n "-/---/-"
+		elif [[ $last_short_test_days != "" ]] && [[ $last_extended_test_days != "" ]] && [[ $drive_age_days != "" ]]; then
+			last_short_test_days=$(printf "%d" $(( $drive_age_days - $last_short_test_days )) | sed -E "s/[[:space:]]//g" )
+			last_extended_test_days=$(printf "%d" $(( $drive_age_days - $last_extended_test_days )) | sed -E "s/[[:space:]]//g" )
+			printf '%d/%03d/%s' "${last_short_test_days}" "${last_extended_test_days}" "$([[ "${last_test_result}" -eq 1 ]] && echo -n "." || echo -n "x")"
+		elif [[ $last_short_test_days != "" ]] && [[ $drive_age_days != "" ]]; then
+			last_short_test_days=$(printf "%d" $(( $drive_age_days - $last_short_test_days )) | sed -E "s/[[:space:]]//g" )
+			printf '%d/---/%s' "${last_short_test_days}" "$([[ "${last_test_result}" -eq 1 ]] && echo -n "." || echo -n "x")"
+		elif [[ $last_extended_test_days != "" ]] && [[ $drive_age_days != "" ]]; then
+			last_extended_test_days=$(printf "%d" $(( $drive_age_days - $last_extended_test_days )) | sed -E "s/[[:space:]]//g" )
+			printf '-/%03d/%s' "${last_extended_test_days}" "$([[ "${last_test_result}" -eq 1 ]] && echo -n "." || echo -n "x")"
+		else
+			echo "ERROR: Unexpected error while getting test status."
+			exit 7
+		fi
+	fi
+}
+
+# Begin main routine =======================================================
+
+# Stop if dependencies not met
+if ! check_dependencies; then
+	echo "ERROR: Some dependencies not met."
+	exit 1
+fi
+
+# Initialize our block devices and the variable that will hold our output
+# as we assemble it
+single_spaced_output=""
+block_devices=( $(get_block_devices) )
+
+# Collect the headers to display, and figure out which column we'll sort by
+headers="${single_spaced_output}$(get_headers)"
+sort_key=$(find_column_of_sort_key "${headers}")
+
+# If SMART attributes will be in the output, collect all the relevant SMART IDs
+smart_prefail_ids=()
+smart_prefail_short_headers=()
+smart_prefail_long_headers=()
+smart_oldage_ids=()
+smart_oldage_short_headers=()
+smart_oldage_long_headers=()
+declare -A smart_ids_and_names
+declare -A device_smart_attributes
+collect_smart_attributes
+
+if [[ $EUID -ne 0 ]]; then
+	smart_prefail_short_headers+=("PREFAIL_ATTRS")
+	smart_prefail_long_headers+=("PREFAIL_ATTRS")
+	smart_oldage_short_headers+=("OLDAGE_ATTRS")
+	smart_oldage_long_headers+=("OLDAGE_ATTRS")
+else
+	for id in "${smart_prefail_ids[@]}"
+	do
+		smart_prefail_short_headers+=($(echo -n ${smart_ids_and_names[$id]} | sed -E "s/[a-z_\-]//g" | cut -c1-3))
+		smart_prefail_long_headers+=(${smart_ids_and_names[$id]})
+	done
+
+	for id in "${smart_oldage_ids[@]}"
+	do
+		smart_oldage_short_headers+=($(echo -n ${smart_ids_and_names[$id]} | sed -E "s/[a-z_\-]//g" | cut -c1-3))
+		smart_oldage_long_headers+=(${smart_ids_and_names[$id]})
+	done
+fi
+
+if [[ ${format} == "horizontal" ]]; then
+	[[ " ${headers_to_show[@]} " =~ " PREFAIL2 " ]] && headers+=${smart_prefail_short_headers[*]}" "
+	[[ " ${headers_to_show[@]} " =~ " OLDAGE2 " ]] 	&& headers+=${smart_oldage_short_headers[*]}" "
+else
+	[[ " ${headers_to_show[@]} " =~ " PREFAIL2 " ]] && headers+=${smart_prefail_long_headers[*]}" "
+	[[ " ${headers_to_show[@]} " =~ " OLDAGE2 " ]] 	&& headers+=${smart_oldage_long_headers[*]}" "
+fi
+
+# Loop through the devices and collect only the data was chosen to display
+for dev in ${block_devices[@]}
+do
+	output_line=""
+	[[ " ${headers_to_show[@]} " =~ " DEVICE " ]]	&& output_line="${output_line}${dev} "
+	[[ " ${headers_to_show[@]} " =~ " CAPACITY " ]]	&& output_line="${output_line}$(get_block_device_capacity "${dev}") "
+	[[ " ${headers_to_show[@]} " =~ " PATH " ]]		&& output_line="${output_line}$(get_block_device_path "${dev}") "
+	[[ " ${headers_to_show[@]} " =~ " MODEL " ]]	&& output_line="${output_line}$(get_block_device_model "${dev}") "
+	[[ " ${headers_to_show[@]} " =~ " SERIAL " ]]	&& output_line="${output_line}$(get_block_device_serial_number "${dev}") "
+	[[ " ${headers_to_show[@]} " =~ " UUID " ]]		&& output_line="${output_line}$(get_block_device_uuid "${dev}") "
+	[[ " ${headers_to_show[@]} " =~ " TEMPERATURE " ]]	&& output_line="${output_line}$(get_block_device_temperature "${dev}") "
+	[[ " ${headers_to_show[@]} " =~ " STATUS " ]]		&& output_line="${output_line}$(get_block_device_spin_status "${dev}") "
+	[[ " ${headers_to_show[@]} " =~ " AGE_YEARS " ]]	&& output_line="${output_line}$(get_block_device_age "${dev}") "
+	[[ " ${headers_to_show[@]} " =~ " LAST_SELFTESTS " ]]	&& output_line="${output_line}$(get_days_since_last_tests "${dev}") "
+	[[ " ${headers_to_show[@]} " =~ " PREFAIL " ]]	&& output_line="${output_line}$(get_block_device_smart_attributes "${dev}" "PREFAIL") "
+	[[ " ${headers_to_show[@]} " =~ " OLDAGE " ]]	&& output_line="${output_line}$(get_block_device_smart_attributes "${dev}" "OLDAGE") "
+	[[ " ${headers_to_show[@]} " =~ " PREFAIL2 " ]]	&& output_line="${output_line}$(get_block_device_smart_attributes "${dev}" "PREFAIL2")" #no extra space at end, added in function
+	[[ " ${headers_to_show[@]} " =~ " OLDAGE2 " ]]	&& output_line="${output_line}$(get_block_device_smart_attributes "${dev}" "OLDAGE2")"  #no extra space at end, added in function
+
+	single_spaced_output=${single_spaced_output}${output_line}$'\n'
+done
+
+# Add headers to output
+if [[ ${format} == "horizontal" ]]; then
+	headers="$(printf "%s" "${headers}" | sed -E "s/DEVICE/DEV/" | sed -E "s/TEMPERATURE/TMP/" | sed -E "s/CAPACITY/CAPAC/" | sed -E "s/AGE_YEARS/AGE/" | sed -E "s/LAST_SELFTESTS/SLFTEST/" | sed -E "s/PATH/AT/")"
+fi
+single_spaced_output="${headers}"$'\n'${single_spaced_output}
+
+# Output the information collected in a wide or tall format
+if [[ ${format} == "horizontal" ]]; then
+	printf_horizontal_table
+elif [[ ${format} == "vertical" ]]; then
+	printf_vertical_table
+else
+	echo "ERROR: Internal error choosing a format option."
+	exit 6
+fi

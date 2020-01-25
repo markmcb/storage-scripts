@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+
+: '
+Author: Mark McBride <mark@markmcb.com>
+
+Description: This script provides a way to view basic disk size and usage information
+alongside BTRFS scrub information. While it should generally be portable on Linux machines
+it has not been extensively tested, so some hacking may be required.
+
+IMPORTANT: This script does require root priviledges as they are required by the btrfs 
+command to access scrub information. You can run without root priviledges,
+but will see "[sudo]" in the output where priviledges are required. 
+'
+
+# get paths
+paths=( `df -T | grep btrfs | sed -E "s/.*% //" | tr '\n' ' '` )
+
+scrub_report="BTRFS_PATH SIZE AVAIL USE% SCB ERR"$'\n'
+for path in "${paths[@]}"
+do
+	if [[ $EUID -ne 0 ]]; then
+		last_scrub_days="[sudo]"
+		summary="[sudo]"
+	else
+		last_scrub_days="$(( ($(date +%s) - $(date --date="$(btrfs scrub status ${path} | grep "started" | sed -E "s/Scrub started: *//")" +%s) )/(60*60*24) ))"
+		summary="$([[ $(btrfs scrub status ${path} | grep "summary") == *"no errors found"* ]] && echo -n "." || echo -n "x" )"
+	fi
+  df="$(\df -h -t btrfs --output=size,avail,pcent ${path} | tail -n1)"
+  scrub_report="${scrub_report}${path} ${df} ${last_scrub_days} ${summary}"$'\n'
+done
+printf "%s" "${scrub_report}" | sed -E "s/[[:space:]]+/ /g" | column -t -s' '
