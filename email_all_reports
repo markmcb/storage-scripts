@@ -28,7 +28,7 @@ You need to do three things before this script will work:
 function get_report_from_remote_server {
 	output=$'\n\n'"-----------------------------------------"$'\n\n'
 	output+="$(source "/home/${USER}/.keychain/${HOSTNAME}-sh";
-			ssh -l ${USER} -i ${SSH_IDENTITY} ${REMOTE_SERVER_ADDRESS} "hostname | sed -E 's/\..*//'") on $(source "/home/${USER}/.keychain/${HOSTNAME}-sh";
+			ssh -l ${USER} -i ${SSH_IDENTITY} ${REMOTE_SERVER_ADDRESS} "hostname | sed -E 's/\..*//'") $(source "/home/${USER}/.keychain/${HOSTNAME}-sh";
 			ssh -l ${USER} -i ${SSH_IDENTITY} ${REMOTE_SERVER_ADDRESS} "uptime | sed -E 's/.*(up[^,]*),.*/\1/'") on $(source "/home/${USER}/.keychain/${HOSTNAME}-sh";
   			ssh -l ${USER} -i ${SSH_IDENTITY} ${REMOTE_SERVER_ADDRESS} "uname -r")"$'\n\n'
 	output+="$(source "/home/${USER}/.keychain/${HOSTNAME}-sh"; 
@@ -55,7 +55,7 @@ EMAIL_TO="youremail@example.com"
 LOCAL_SCRIPT_INSTALLATION_DIR="/home/${USER}/storage_report_dir" # where you've got this script and the 3 others installed.
 STORAGE_REPORT_ARGS="-d -C -f -a -l -t -p --pathsubst '/.*phy([[:digit:]]+).*/\1/'" # change these as you see fit, see storage_report -h for options
 source "/home/${USER}/.keychain/${HOSTNAME}-sh"
-email_report="${HOSTNAME} $(uptime | sed -E 's/.*(up[^,]*),.*/\1/') on $(uname -r)"$'\n\n'
+email_report="$(printf '%s' ${HOSTNAME} | sed -E 's/\..*//') $(uptime | sed -E 's/.*(up[^,]*),.*/\1/') on $(uname -r)"$'\n\n'
 email_report+="$(eval "sudo ${LOCAL_SCRIPT_INSTALLATION_DIR}/storage_report ${STORAGE_REPORT_ARGS}")"$'\n\n'
 email_report+="$(sudo ${LOCAL_SCRIPT_INSTALLATION_DIR}/btrfs_filesystem_report)"$'\n\n'
 email_report+="$(sudo ${LOCAL_SCRIPT_INSTALLATION_DIR}/btrfs_device_report)"
