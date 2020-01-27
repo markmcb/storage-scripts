@@ -281,8 +281,8 @@ function get_block_device_smart_attributes {
 		for attr in "${attributes[@]}"
 		do
 			smart_diff="---"
-			smart_value=$(echo -e "${device_smart_attributes[${1}]}" | grep ${attr} | awk -F ' ' '{print $4}')
-			smart_thresh=$(echo -e "${device_smart_attributes[${1}]}" | grep ${attr} | awk -F ' ' '{print $6}')
+			smart_value=$(echo -e "${device_smart_attributes[${1}]}" | grep $(printf '%s' ${attr} | sed -E 's/^[[:digit:]]+_//') | awk -F ' ' '{print $4}')
+			smart_thresh=$(echo -e "${device_smart_attributes[${1}]}" | grep $(printf '%s' ${attr} | sed -E 's/^[[:digit:]]+_//') | awk -F ' ' '{print $6}')
 			if [[ $smart_value != "" ]]; then 
 				smart_diff="$(bc <<< "${smart_value}-${smart_thresh}")"
 			fi
@@ -394,13 +394,13 @@ else
 	for id in "${smart_prefail_ids[@]}"
 	do
 		smart_prefail_short_headers+=($(echo -n ${smart_ids_and_names[$id]} | sed -E "s/[a-z_\-]//g" | cut -c1-3))
-		smart_prefail_long_headers+=(${smart_ids_and_names[$id]})
+		smart_prefail_long_headers+=("${id}_${smart_ids_and_names[$id]}")
 	done
 
 	for id in "${smart_oldage_ids[@]}"
 	do
 		smart_oldage_short_headers+=($(echo -n ${smart_ids_and_names[$id]} | sed -E "s/[a-z_\-]//g" | cut -c1-3))
-		smart_oldage_long_headers+=(${smart_ids_and_names[$id]})
+		smart_oldage_long_headers+=("${id}_${smart_ids_and_names[$id]}")
 	done
 fi
 

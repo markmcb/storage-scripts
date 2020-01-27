@@ -5,7 +5,7 @@ This is a collection of scripts to condense the high-text-volume output of SMART
 ## Example Output
 
 ```
-CORE up 2 days, 4 hours, 4 minutes on 5.4.12-200.fc31.x86_64
+CORE up 2 days on 5.4.12-200.fc31.x86_64
 
 DEV  CAPAC  AT  TMP  AGE  SLFTEST  PREFAIL
 sda  466Gi  8   24C  1.8  6/043/.  ....

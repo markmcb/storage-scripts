@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+
+: '
+Author: Mark McBride <mark@markmcb.com>
+Source: https://github.com/markmcb/storage-scripts
+
+Description: This script runs locally and to all servers listed and runs all of the
+storage scripts, collects their outputs, and emails them.
+
+Dependencies: This script assumes the following binaries are available, but you could
+replace them with equivalents:
+1. Keychain - https://www.funtoo.org/Keychain - allows you to cache ssh passwords
+2. msmtp - https://marlam.de/msmtp/ - an SMTP client to send email
+3. storage-scripts - the three other scripts available at the github link above
+
+IMPORTANT: This script does require root priviledges. 
+
+!!!!!!!!!! CONFIGURE IT FIRST !!!!!!!!!!
+You need to do three things before this script will work:
+1. Change any variables in ALL CAPS to meet your needs.
+2. Look for the comment "Servers" below. Add/remove blocks and the associated ALL CAPS
+   variables to meet your needs.
+3. Look for the variable DID_NOT_READ_THE_INSTRUCTIONS and change it to anything
+   but 1. (Or just delete it and the if statement below it.)
+
+'
+
+function get_report_from_remote_server {
+	output=$'\n\n'"-----------------------------------------"$'\n\n'
+	output+="$(source "/home/${USER}/.keychain/${HOSTNAME}-sh";
+			ssh -l ${USER} -i ${SSH_IDENTITY} ${REMOTE_SERVER_ADDRESS} "hostname | sed -E 's/\..*//'") on $(source "/home/${USER}/.keychain/${HOSTNAME}-sh";
+			ssh -l ${USER} -i ${SSH_IDENTITY} ${REMOTE_SERVER_ADDRESS} "uptime | sed -E 's/.*(up[^,]*),.*/\1/'") on $(source "/home/${USER}/.keychain/${HOSTNAME}-sh";
+  			ssh -l ${USER} -i ${SSH_IDENTITY} ${REMOTE_SERVER_ADDRESS} "uptime | sed -E 's/.*(up[^,]*),.*/\1/'") on $(source "/home/${USER}/.keychain/${HOSTNAME}-sh"; 
+  			ssh -l ${USER} -i ${SSH_IDENTITY} ${REMOTE_SERVER_ADDRESS} "uname -r")"$'\n\n'
+	output+="$(source "/home/${USER}/.keychain/${HOSTNAME}-sh"; 
+			ssh -l ${USER} -i ${SSH_IDENTITY} ${REMOTE_SERVER_ADDRESS} "sudo ${REMOTE_SCRIPT_INSTALLATION_DIR}/storage_report ${STORAGE_REPORT_ARGS}")"$'\n\n'
+	output+="$(source "/home/${USER}/.keychain/${HOSTNAME}-sh"; 
+			ssh -l ${USER} -i ${SSH_IDENTITY} ${REMOTE_SERVER_ADDRESS} "sudo ${REMOTE_SCRIPT_INSTALLATION_DIR}/btrfs_filesystem_report")"$'\n\n'
+	output+="$(source "/home/${USER}/.keychain/${HOSTNAME}-sh"; 
+			ssh -l ${USER} -i ${SSH_IDENTITY} ${REMOTE_SERVER_ADDRESS} "sudo ${REMOTE_SCRIPT_INSTALLATION_DIR}/btrfs_device_report")"$'\n\n'
+	printf '%s' "${output}"
+}
+
+DID_NOT_READ_THE_INSTRUCTIONS=1
+if [[ "${DID_NOT_READ_THE_INSTRUCTIONS}" == "1" ]]; then
+	echo "Examine the contents of this script and configure it first."
+	exit 1
+fi
+
+# Where the report will get sent
+EMAIL_TO="youremail@example.com"
+
+# Servers
+
+# Local server, i.e., the one you're running the script on
+LOCAL_SCRIPT_INSTALLATION_DIR="/home/${USER}/storage_report_dir" # where you've got this script and the 3 others installed.
+STORAGE_REPORT_ARGS="-d -C -f -a -l -t -p --pathsubst '/.*phy([[:digit:]]+).*/\1/'" # change these as you see fit, see storage_report -h for options
+source "/home/${USER}/.keychain/${HOSTNAME}-sh"
+email_report="${HOSTNAME} $(uptime | sed -E 's/.*(up[^,]*),.*/\1/') on $(uname -r)"$'\n\n'
+email_report+="$(eval "sudo ${LOCAL_SCRIPT_INSTALLATION_DIR}/storage_report ${STORAGE_REPORT_ARGS}")"$'\n\n'
+email_report+="$(sudo ${LOCAL_SCRIPT_INSTALLATION_DIR}/btrfs_filesystem_report)"$'\n\n'
+email_report+="$(sudo ${LOCAL_SCRIPT_INSTALLATION_DIR}/btrfs_device_report)"
+
+# Remote server 1 (delete if not needed)
+REMOTE_SCRIPT_INSTALLATION_DIR="/home/${USER}/storage_report_dir"
+STORAGE_REPORT_ARGS="-d -C -f -a -l -t -p --pathsubst '/.*scsi-0:0:([[:digit:]]).*/\1/'"
+SSH_IDENTITY="/home/${USER}/.ssh/id_ed25519"
+REMOTE_SERVER_ADDRESS="10.0.1.234"
+email_report+="$(get_report_from_remote_server)"
+
+# Remote server 2 (delete if not needed, copy/paste this block if you have more)
+REMOTE_SCRIPT_INSTALLATION_DIR="/home/${USER}/storage_report_dir"
+STORAGE_REPORT_ARGS="-d -C -f -a -l -t -p --pathsubst '/.*([[:digit:]])$/\1/'"
+SSH_IDENTITY="/home/${USER}/.ssh/id_ed25519"
+REMOTE_SERVER_ADDRESS="1.2.3.4"
+email_report+="$(get_report_from_remote_server)"
+
+email="To: ${EMAIL_TO}
+Subject: Storage Report
+MIME-Version: 1.0
+Content-type: multipart/alternative; boundary=abcdefghijklmnopqrstuvwxyz
+
+explanatory note to non-MIME compliant readers.
+--abcdefghijklmnopqrstuvwxyz
+Content-Type: text/plain; charset=utf-8
+
+$(printf "%s" "$email_report")
+
+--abcdefghijklmnopqrstuvwxyz
+Content-type: text/html; charset=utf-8
+
+<html>
+<body>
+<style type=\"text/css\" media=\"screen\">
+				.message { font-family: \"Fira Code\", \"Courier New\", monospace; font-size: 0.9em; }
+	@media only screen and (min-device-width: 375px) and (max-device-width: 667px) and (-webkit-min-device-pixel-ratio: 2) { 
+		.message {font-size: 0.8em;}
+	}
+</style>
+<div class=\"message\">
+<pre>
+$(printf "%s" "$email_report")
+</pre>
+</div>
+</body>
+</html>
+
+--abcdefghijklmnopqrstuvwxyz--"
+
+/usr/bin/msmtp -a default ${EMAIL_TO} < <(printf "%s" "$email")
