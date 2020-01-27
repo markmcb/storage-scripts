@@ -30,7 +30,6 @@ function get_report_from_remote_server {
 	output+="$(source "/home/${USER}/.keychain/${HOSTNAME}-sh";
 			ssh -l ${USER} -i ${SSH_IDENTITY} ${REMOTE_SERVER_ADDRESS} "hostname | sed -E 's/\..*//'") on $(source "/home/${USER}/.keychain/${HOSTNAME}-sh";
 			ssh -l ${USER} -i ${SSH_IDENTITY} ${REMOTE_SERVER_ADDRESS} "uptime | sed -E 's/.*(up[^,]*),.*/\1/'") on $(source "/home/${USER}/.keychain/${HOSTNAME}-sh";
-  			ssh -l ${USER} -i ${SSH_IDENTITY} ${REMOTE_SERVER_ADDRESS} "uptime | sed -E 's/.*(up[^,]*),.*/\1/'") on $(source "/home/${USER}/.keychain/${HOSTNAME}-sh"; 
   			ssh -l ${USER} -i ${SSH_IDENTITY} ${REMOTE_SERVER_ADDRESS} "uname -r")"$'\n\n'
 	output+="$(source "/home/${USER}/.keychain/${HOSTNAME}-sh"; 
 			ssh -l ${USER} -i ${SSH_IDENTITY} ${REMOTE_SERVER_ADDRESS} "sudo ${REMOTE_SCRIPT_INSTALLATION_DIR}/storage_report ${STORAGE_REPORT_ARGS}")"$'\n\n'
