@@ -31,7 +31,7 @@ function usage {
 	echo "storage_report [ <options> ]"
 	echo
 
-	echo "OPTIONS: (* denotes root priviledges are required for results,"
+	echo "OPTIONS: An * denotes root priviledges are required for results,"
 	echo "         otherwise \"[sudo]\" will be displayed in the output."
 	echo
 
@@ -42,7 +42,7 @@ function usage {
 	echo "-C, --CAPACITY  Show and sort by device storage capacity."
 	echo "-d, --device    Show device name."
 	echo "-D, --DEVICE    Show and sort by device name. Default."
-	echo "-i, --idle      *Spin status of HDDs. Either active or idle."i
+	echo "-i, --idle      *Spin status of HDDs. Either active or idle."
 	echo "-m, --model     Model name."
 	echo "-p, --path      Show dev path (useful physically locating a device)."
 	echo "-P, --PATH      Show and sort by device path."
