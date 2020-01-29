@@ -19,7 +19,7 @@ order=${valid_order[0]}
 valid_format=( "horizontal" "vertical" )
 format=${valid_format[0]}
 
-valid_headers=( "DEVICE" "CAPACITY" "PATH" "MODEL" "SERIAL" "UUID" "TEMPERATURE" "STATUS" "AGE_YEARS" "LAST_SELFTESTS" "PREFAIL" "OLDAGE")
+valid_headers=( "DEVICE" "CAPACITY" "PATH" "MODEL" "SERIAL" "WWN" "UUID" "TEMPERATURE" "STATUS" "AGE_YEARS" "LAST_SELFTESTS" "PREFAIL" "OLDAGE")
 headers_to_show=( "DEVICE" "CAPACITY" "MODEL" )
 headers_override=()
 
@@ -49,7 +49,8 @@ function usage {
 	echo "    --pcisubst  A regex substitution, quoted, e.g., \"/a(b)c/\1/\""
 	echo "-s, --serial    Serial number."
 	echo "-t, --temp      *Temperature in Celsius."
-	echo "-u, --uuid      Show device UUID."
+	echo "-u, --uuid      Show device UUID (for full-disk partitions)."
+	echo "-w, --wwn       Show device WWN."
 	echo
 
 	echo "S.M.A.R.T. Attributes"
@@ -103,6 +104,7 @@ while [[ "$#" -gt 0 ]]; do case $1 in
 	-s|--serial)	headers_override+=("SERIAL");;
 	-t|--temp)		headers_override+=("TEMPERATURE");;
 	-u|-uuid)		headers_override+=("UUID");;
+	-w|-wwn)		headers_override+=("WWN");;
     -x|--tall)		format="horizontal";;
 	-y|--wide)		format="vertical";;
   	*) echo "Unknown parameter passed: $1. Use -h for a list of valid options."; exit 1;;
@@ -170,6 +172,10 @@ function get_block_device_temperature {
 
 function get_block_device_uuid {
 	find -L "/dev/disk/by-uuid/" -samefile "/dev/${1}" | sed -E "s/.*\///"
+}
+
+function get_block_device_wwn {
+	find -L "/dev/disk/by-id/" -samefile "/dev/${1}" | grep 'wwn' | sed -E "s/.*wwn-0x//"
 }
 
 function get_block_device_path {
@@ -421,6 +427,7 @@ do
 	[[ " ${headers_to_show[@]} " =~ " PATH " ]]		&& output_line="${output_line}$(get_block_device_path "${dev}") "
 	[[ " ${headers_to_show[@]} " =~ " MODEL " ]]	&& output_line="${output_line}$(get_block_device_model "${dev}") "
 	[[ " ${headers_to_show[@]} " =~ " SERIAL " ]]	&& output_line="${output_line}$(get_block_device_serial_number "${dev}") "
+	[[ " ${headers_to_show[@]} " =~ " WWN " ]]		&& output_line="${output_line}$(get_block_device_wwn "${dev}") "
 	[[ " ${headers_to_show[@]} " =~ " UUID " ]]		&& output_line="${output_line}$(get_block_device_uuid "${dev}") "
 	[[ " ${headers_to_show[@]} " =~ " TEMPERATURE " ]]	&& output_line="${output_line}$(get_block_device_temperature "${dev}") "
 	[[ " ${headers_to_show[@]} " =~ " STATUS " ]]		&& output_line="${output_line}$(get_block_device_spin_status "${dev}") "
