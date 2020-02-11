@@ -97,7 +97,7 @@ do
 	# capture the disk id (key) and value of each line
 	# regex1: get stuff in [brackets], regex2: get the first 9 chars after last /
 	if [ "${verbose}" == "0" ]; then
-		key=$( echo $p | sed -E "s/\[(.*)\].*/\1/" | sed -E "s/.*\/([^/]{1,${mapping_length}}).*/\1/" )
+		key=$( echo $p | sed -E "s/\[(.*)\].*/\1/" | sed -E "s/.*\/([^/]*)/\1/" )
 	else
 		key=$( echo $p | sed -E "s/\[(.*)\].*/\1/" )
 	fi
@@ -130,7 +130,7 @@ do
 
 	# if the key changed, put key value, otherwise just value
 	if [ "${key}" != "${lastkey}" ]; then
-		printf "%-${longest_path}s  %-${mapping_length}s  %-${longest_device}s  %${valuesize}s" "${path}" "${key}" "${device}" "${value}" 
+		printf "%-${longest_path}s  %-${mapping_length}.${mapping_length}s  %-${longest_device}s  %${valuesize}s" "${path}" "${key}" "${device}" "${value}" 
 	else
 		if [ "${verbose}" == "0" ]; then
 			printf "%${valuesize}s" "${value}"
