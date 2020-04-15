@@ -31,7 +31,7 @@ while getopts $optstring opt; do
 done
 
 # get paths
-paths=( `df -T | grep btrfs | sed -E "s/.*% //" | tr '\n' ' '` )
+paths=( `df -T | grep btrfs | grep -v "/var/lib" | sed -E "s/.*% //" | tr '\n' ' '` )
 longest_path=10
 
 # get lsblk info, make it flat per disk

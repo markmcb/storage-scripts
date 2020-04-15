@@ -13,7 +13,7 @@ but will see "[sudo]" in the output where priviledges are required.
 '
 
 # get paths
-paths=( `df -T | grep btrfs | sed -E "s/.*% //" | tr '\n' ' '` )
+paths=( `df -T | grep btrfs | grep -v "/var/lib" | sed -E "s/.*% //" | tr '\n' ' '` )
 
 scrub_report="BTRFS_PATH SIZE AVAIL USE% SCB ERR"$'\n'
 for path in "${paths[@]}"
