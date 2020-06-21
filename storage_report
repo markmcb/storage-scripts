@@ -46,7 +46,7 @@ function usage {
 	echo "-m, --model     Model name."
 	echo "-p, --path      Show dev path (useful physically locating a device)."
 	echo "-P, --PATH      Show and sort by device path."
-	echo "    --pcisubst  A regex substitution, quoted, e.g., \"/a(b)c/\1/\""
+	echo "    --pathsubst A regex substitution, quoted, e.g., \"/a(b)c/\1/\""
 	echo "-s, --serial    Serial number."
 	echo "-t, --temp      *Temperature in Celsius."
 	echo "-u, --uuid      Show device UUID (for full-disk partitions)."
