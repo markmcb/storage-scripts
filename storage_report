@@ -180,11 +180,16 @@ function get_block_device_wwn {
 
 function get_block_device_path {
 	if [[ " ${headers_to_show[@]} " =~ " PATH " ]]; then
-		if [[ ! -z "${pathsubst}" ]]; then
-			echo -n $(find -L /dev/disk/by-path/ -samefile /dev/${1} | sed -E "s/.*\///" | sed -E "s${pathsubst}")
+		raw_path=""
+		if [[ -d "/dev/disk/by-path" ]] && find -L "/dev/disk/by-path/" -samefile "/dev/${1}" > "/dev/null" ; then
+			raw_path="$(find -L /dev/disk/by-path/ -samefile /dev/${1} | sed -E "s/.*\///")"
 		else
-			echo -n $(find -L /dev/disk/by-path/ -samefile /dev/${1} | sed -E "s/.*\///")
+			raw_path="$(readlink --canonicalize /sys/block/${1})"
 		fi
+		if [[ ! -z "${pathsubst}" ]]; then
+			raw_path="$(echo $raw_path | sed -E "s${pathsubst}")"
+		fi
+		echo -n "$raw_path"
 	fi
 }
 
